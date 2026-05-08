@@ -1,5 +1,7 @@
 package dev.feddi.api.usage;
 
+import org.jspecify.annotations.Nullable;
+
 public class UsageReportClientException extends RuntimeException {
 
     private final int statusCode;
@@ -8,7 +10,7 @@ public class UsageReportClientException extends RuntimeException {
         this(message, -1, null);
     }
 
-    public UsageReportClientException(String message, Throwable cause) {
+    public UsageReportClientException(String message, @Nullable Throwable cause) {
         this(message, -1, cause);
     }
 
@@ -16,7 +18,7 @@ public class UsageReportClientException extends RuntimeException {
         this(message, statusCode, null);
     }
 
-    public UsageReportClientException(String message, int statusCode, Throwable cause) {
+    public UsageReportClientException(String message, int statusCode, @Nullable Throwable cause) {
         super(message, cause);
         this.statusCode = statusCode;
     }

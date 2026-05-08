@@ -19,8 +19,7 @@ class UsageReportProtoTest {
                 .addRecords(UsageRecord.newBuilder()
                         .setOperationName("GetUser")
                         .setOperationType("QUERY")
-                        .setOperationHash("abc123")
-                        .setOperationBody("query GetUser { user { id name } }")
+                        .setCanonicalDocument("query GetUser { user { id name } }")
                         .addFieldCoordinates("Query.user")
                         .addFieldCoordinates("User.id")
                         .setDurationNanos(1_500_000)
@@ -41,8 +40,7 @@ class UsageReportProtoTest {
 
         assertEquals("GetUser", record.getOperationName());
         assertEquals("QUERY", record.getOperationType());
-        assertEquals("abc123", record.getOperationHash());
-        assertEquals("query GetUser { user { id name } }", record.getOperationBody());
+        assertEquals("query GetUser { user { id name } }", record.getCanonicalDocument());
         assertEquals("Query.user", record.getFieldCoordinates(0));
         assertEquals("User.id", record.getFieldCoordinates(1));
         assertEquals(1_500_000, record.getDurationNanos());

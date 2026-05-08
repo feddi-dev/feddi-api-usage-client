@@ -15,16 +15,15 @@ message UsageReportRequest {
 message UsageRecord {
   string operation_name = 1;
   string operation_type = 2;
-  string operation_hash = 3;
-  string operation_body = 4;
-  repeated string field_coordinates = 5;
-  int64 duration_nanos = 7;
-  bool http_error = 8;
-  bool graphql_error = 9;
-  string client_name = 10;
-  string client_version = 11;
-  google.protobuf.Timestamp timestamp = 12;
-  optional int32 multiplier = 13;
+  string canonical_document = 3;
+  repeated string field_coordinates = 4;
+  int64 duration_nanos = 5;
+  bool http_error = 6;
+  bool graphql_error = 7;
+  string client_name = 8;
+  string client_version = 9;
+  google.protobuf.Timestamp timestamp = 10;
+  optional int32 multiplier = 11;
 }
 
 message UsageReportResponse {

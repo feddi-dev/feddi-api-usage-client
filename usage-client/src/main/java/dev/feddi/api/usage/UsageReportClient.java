@@ -5,6 +5,7 @@ import dev.feddi.api.usage.http.ReactiveHttpClient;
 import dev.feddi.api.usage.http.ReactiveHttpRequest;
 import dev.feddi.api.usage.v1.UsageReportRequest;
 import dev.feddi.api.usage.v1.UsageReportResponse;
+import org.jspecify.annotations.Nullable;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
@@ -12,28 +13,23 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-public final class UsageReportClient {
+final class UsageReportClient {
 
-    public static final String PROTOBUF_CONTENT_TYPE = "application/x-protobuf";
-    public static final String DEFAULT_USAGE_PROTO_PATH = "/api/usage-proto";
+    static final String PROTOBUF_CONTENT_TYPE = "application/x-protobuf";
+    static final String DEFAULT_USAGE_PROTO_PATH = "/api/usage-proto";
+    static final URI DEFAULT_PLATFORM_HOST = URI.create("https://feddi.dev");
 
     private final ReactiveHttpClient httpClient;
     private final URI endpointUri;
     private final String bearerToken;
 
-    private UsageReportClient(Builder builder) {
-        this.httpClient = Objects.requireNonNull(builder.httpClient, "httpClient");
-        this.endpointUri = builder.endpointUri != null
-                ? builder.endpointUri
-                : resolveEndpoint(Objects.requireNonNull(builder.baseUri, "baseUri"));
-        this.bearerToken = requireNonBlank(builder.bearerToken, "bearerToken");
+    UsageReportClient(ReactiveHttpClient httpClient, URI host, String bearerToken) {
+        this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
+        this.endpointUri = resolveEndpoint(Objects.requireNonNull(host, "host"));
+        this.bearerToken = requireNonBlank(bearerToken, "bearerToken");
     }
 
-    public static Builder builder(ReactiveHttpClient httpClient) {
-        return new Builder(httpClient);
-    }
-
-    public Mono<UsageReportResponse> report(UsageReportRequest request) {
+    Mono<UsageReportResponse> report(UsageReportRequest request) {
         Objects.requireNonNull(request, "request");
 
         var httpRequest = new ReactiveHttpRequest(
@@ -70,6 +66,15 @@ public final class UsageReportClient {
     }
 
     private static URI resolveEndpoint(URI baseUri) {
+        if (!baseUri.isAbsolute()) {
+            throw new IllegalArgumentException("host must be an absolute URI");
+        }
+        if (baseUri.getPath() != null && !baseUri.getPath().isBlank() && !baseUri.getPath().equals("/")) {
+            throw new IllegalArgumentException("host must not include a path");
+        }
+        if (baseUri.getQuery() != null || baseUri.getFragment() != null) {
+            throw new IllegalArgumentException("host must not include a query or fragment");
+        }
         String base = baseUri.toString();
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
@@ -77,44 +82,10 @@ public final class UsageReportClient {
         return URI.create(base + DEFAULT_USAGE_PROTO_PATH);
     }
 
-    private static String requireNonBlank(String value, String name) {
+    private static String requireNonBlank(@Nullable String value, String name) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
-    }
-
-    public static final class Builder {
-
-        private final ReactiveHttpClient httpClient;
-        private URI baseUri;
-        private URI endpointUri;
-        private String bearerToken;
-
-        private Builder(ReactiveHttpClient httpClient) {
-            this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
-        }
-
-        public Builder baseUri(URI baseUri) {
-            this.baseUri = Objects.requireNonNull(baseUri, "baseUri");
-            return this;
-        }
-
-        public Builder endpointUri(URI endpointUri) {
-            this.endpointUri = Objects.requireNonNull(endpointUri, "endpointUri");
-            return this;
-        }
-
-        public Builder bearerToken(String bearerToken) {
-            this.bearerToken = bearerToken;
-            return this;
-        }
-
-        public UsageReportClient build() {
-            if (baseUri == null && endpointUri == null) {
-                throw new IllegalStateException("baseUri or endpointUri must be configured");
-            }
-            return new UsageReportClient(this);
-        }
     }
 }

@@ -30,15 +30,16 @@ class UsageReportClientTest {
                     Mono.just(UsageReportResponse.newBuilder().setAccepted(1).build().toByteArray())
             ));
         };
-        var client = UsageReportClient.builder(httpClient)
-                .baseUri(URI.create("https://api.example.test"))
-                .bearerToken("fddi_test_key")
-                .build();
+        var client = new UsageReportClient(
+                httpClient,
+                URI.create("https://api.example.test"),
+                "fddi_test_key"
+        );
         var request = UsageReportRequest.newBuilder()
                 .addRecords(UsageRecord.newBuilder()
                         .setOperationName("GetUser")
                         .setOperationType("QUERY")
-                        .setOperationHash("abc123")
+                        .setCanonicalDocument("query GetUser { user { id } }")
                         .addFieldCoordinates("Query.user")
                         .setDurationNanos(1_000_000)
                         .build())
@@ -68,7 +69,7 @@ class UsageReportClientTest {
     }
 
     @Test
-    void report_usesConfiguredEndpointUri() {
+    void report_trimsTrailingSlashFromConfiguredHost() {
         var capturedRequest = new AtomicReference<ReactiveHttpRequest>();
         ReactiveHttpClient httpClient = request -> {
             capturedRequest.set(request);
@@ -76,28 +77,30 @@ class UsageReportClientTest {
                     200,
                     Map.of(),
                     Mono.just(UsageReportResponse.newBuilder().build().toByteArray())
-            ));
+                ));
         };
 
-        var client = UsageReportClient.builder(httpClient)
-                .endpointUri(URI.create("https://api.example.test/custom"))
-                .bearerToken("fddi_test_key")
-                .build();
+        var client = new UsageReportClient(
+                httpClient,
+                URI.create("https://api.example.test/"),
+                "fddi_test_key"
+        );
 
         StepVerifier.create(client.report(UsageReportRequest.newBuilder().build()))
                 .expectNextCount(1)
                 .verifyComplete();
 
-        assertEquals(URI.create("https://api.example.test/custom"), capturedRequest.get().uri());
+        assertEquals(URI.create("https://api.example.test/api/usage-proto"), capturedRequest.get().uri());
     }
 
     @Test
     void report_surfacesNonSuccessStatus() {
         ReactiveHttpClient httpClient = request -> Mono.just(new ReactiveHttpResponse(403, Map.of(), Mono.just(new byte[0])));
-        var client = UsageReportClient.builder(httpClient)
-                .baseUri(URI.create("https://api.example.test"))
-                .bearerToken("fddi_test_key")
-                .build();
+        var client = new UsageReportClient(
+                httpClient,
+                URI.create("https://api.example.test"),
+                "fddi_test_key"
+        );
 
         StepVerifier.create(client.report(UsageReportRequest.newBuilder().build()))
                 .expectErrorSatisfies(error -> {
@@ -114,10 +117,11 @@ class UsageReportClientTest {
                 Map.of(),
                 Mono.just(new byte[]{1, 2, 3})
         ));
-        var client = UsageReportClient.builder(httpClient)
-                .baseUri(URI.create("https://api.example.test"))
-                .bearerToken("fddi_test_key")
-                .build();
+        var client = new UsageReportClient(
+                httpClient,
+                URI.create("https://api.example.test"),
+                "fddi_test_key"
+        );
 
         StepVerifier.create(client.report(UsageReportRequest.newBuilder().build()))
                 .expectError(UsageReportClientException.class)
