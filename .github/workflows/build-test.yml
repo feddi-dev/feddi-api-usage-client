@@ -24,3 +24,6 @@ jobs:
 
       - name: Build and test
         run: ./scripts/build.sh
+
+      - name: JCStress
+        run: ./scripts/jcstress.sh

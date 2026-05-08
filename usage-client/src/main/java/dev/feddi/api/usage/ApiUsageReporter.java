@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
@@ -59,6 +60,8 @@ public final class ApiUsageReporter implements AutoCloseable {
     private final UsageReportClient client;
     private final ApiUsageDocumentAnalyzer analyzer;
     private final ConcurrentLinkedQueue<PendingUsage> pendingQueue = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger pendingCount = new AtomicInteger(0);
+    private final Object lifecycleLock = new Object();
     private final int maxBatchSize;
     private final int maxQueueSize;
     private final Duration flushInterval;
@@ -123,23 +126,26 @@ public final class ApiUsageReporter implements AutoCloseable {
      */
     public boolean report(ApiUsageInvocation invocation) {
         Objects.requireNonNull(invocation, "invocation");
-        if (closed.get()) {
-            return false;
-        }
+        synchronized (lifecycleLock) {
+            if (closed.get()) {
+                return false;
+            }
 
-        requestCounter.incrementAndGet();
-        if (randomSupplier.getAsDouble() >= sampleRate) {
-            return false;
-        }
+            requestCounter.incrementAndGet();
+            if (randomSupplier.getAsDouble() >= sampleRate) {
+                return false;
+            }
 
-        if (pendingQueue.size() >= maxQueueSize) {
-            droppedCount.incrementAndGet();
-            return false;
-        }
+            if (pendingCount.get() >= maxQueueSize) {
+                droppedCount.incrementAndGet();
+                return false;
+            }
 
-        pendingQueue.add(new PendingUsage(invocation, multiplier));
-        if (pendingQueue.size() >= maxBatchSize) {
-            scheduler.execute(this::processAndFlushSafely);
+            pendingCount.incrementAndGet();
+            pendingQueue.add(new PendingUsage(invocation, multiplier));
+            if (pendingCount.get() >= maxBatchSize) {
+                scheduler.execute(this::processAndFlushSafely);
+            }
         }
         return true;
     }
@@ -162,9 +168,11 @@ public final class ApiUsageReporter implements AutoCloseable {
      * @return response from the final flush
      */
     public Mono<UsageReportResponse> closeAsync() {
-        if (closed.compareAndSet(false, true)) {
-            scheduledFlush.cancel();
-            scheduler.close();
+        synchronized (lifecycleLock) {
+            if (closed.compareAndSet(false, true)) {
+                scheduledFlush.cancel();
+                scheduler.close();
+            }
         }
         return flushNow();
     }
@@ -225,6 +233,7 @@ public final class ApiUsageReporter implements AutoCloseable {
         var records = new ArrayList<UsageRecord>(maxBatchSize);
         PendingUsage pending;
         while (records.size() < maxBatchSize && (pending = pendingQueue.poll()) != null) {
+            pendingCount.decrementAndGet();
             try {
                 records.add(toProto(pending));
             } catch (RuntimeException e) {
@@ -288,7 +297,7 @@ public final class ApiUsageReporter implements AutoCloseable {
     }
 
     int getPendingQueueSize() {
-        return pendingQueue.size();
+        return pendingCount.get();
     }
 
     long getDroppedCount() {
