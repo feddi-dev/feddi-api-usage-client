@@ -9,4 +9,5 @@ dependencies {
     api 'org.jspecify:jspecify:1.0.0'
 
     testImplementation 'io.projectreactor:reactor-test:3.8.4'
+    testImplementation 'org.assertj:assertj-core:3.27.7'
 }

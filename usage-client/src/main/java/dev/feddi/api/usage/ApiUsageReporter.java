@@ -14,10 +14,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -65,7 +62,8 @@ public final class ApiUsageReporter implements AutoCloseable {
     private final int maxBatchSize;
     private final int maxQueueSize;
     private final Duration flushInterval;
-    private final ScheduledExecutorService scheduler;
+    private final ReporterScheduler scheduler;
+    private final ReporterScheduler.Cancellable scheduledFlush;
     private final AtomicLong requestCounter = new AtomicLong(0);
     private final AtomicLong droppedCount = new AtomicLong(0);
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -90,20 +88,16 @@ public final class ApiUsageReporter implements AutoCloseable {
         this.randomSupplier = builder.randomSupplier != null
                 ? builder.randomSupplier
                 : () -> ThreadLocalRandom.current().nextDouble();
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread thread = new Thread(r, "feddi-api-usage-reporter");
-            thread.setDaemon(true);
-            return thread;
-        });
+        this.scheduler = builder.scheduler != null ? builder.scheduler : new ScheduledExecutorReporterScheduler();
 
         if (builder.autoStart) {
-            long intervalMillis = this.flushInterval.toMillis();
-            scheduler.scheduleAtFixedRate(
+            this.scheduledFlush = scheduler.scheduleAtFixedRate(
                     this::processAndFlushSafely,
-                    intervalMillis,
-                    intervalMillis,
-                    TimeUnit.MILLISECONDS
+                    this.flushInterval,
+                    this.flushInterval
             );
+        } else {
+            this.scheduledFlush = () -> {};
         }
     }
 
@@ -169,7 +163,8 @@ public final class ApiUsageReporter implements AutoCloseable {
      */
     public Mono<UsageReportResponse> closeAsync() {
         if (closed.compareAndSet(false, true)) {
-            scheduler.shutdown();
+            scheduledFlush.cancel();
+            scheduler.close();
         }
         return flushNow();
     }
@@ -321,6 +316,7 @@ public final class ApiUsageReporter implements AutoCloseable {
         private boolean autoStart = true;
         private @Nullable Consumer<Throwable> flushErrorHandler;
         private @Nullable DoubleSupplier randomSupplier;
+        private @Nullable ReporterScheduler scheduler;
 
         private Builder(ReactiveHttpClient httpClient) {
             this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
@@ -432,6 +428,11 @@ public final class ApiUsageReporter implements AutoCloseable {
 
         Builder randomSupplier(DoubleSupplier randomSupplier) {
             this.randomSupplier = Objects.requireNonNull(randomSupplier, "randomSupplier");
+            return this;
+        }
+
+        Builder scheduler(ReporterScheduler scheduler) {
+            this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
             return this;
         }
 

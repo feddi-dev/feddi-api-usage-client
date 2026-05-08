@@ -11,13 +11,17 @@ import graphql.language.OperationDefinition;
 import graphql.language.Selection;
 import graphql.language.SelectionSet;
 import graphql.schema.GraphQLFieldDefinition;
+import graphql.schema.GraphQLFieldsContainer;
+import graphql.schema.GraphQLInterfaceType;
 import graphql.schema.GraphQLObjectType;
 import graphql.schema.GraphQLSchema;
 import graphql.schema.GraphQLType;
 import graphql.schema.GraphQLTypeUtil;
 import graphql.schema.GraphQLUnmodifiedType;
+import graphql.schema.GraphQLUnionType;
 import org.jspecify.annotations.Nullable;
 
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -78,16 +82,17 @@ final class ApiUsageDocumentAnalyzer {
             return List.of();
         }
 
-        collectFields(rootType, operation.getSelectionSet(), coordinates, fragments, schema);
+        collectFields(rootType, operation.getSelectionSet(), coordinates, fragments, schema, new HashSet<>());
         return List.copyOf(coordinates);
     }
 
     private static void collectFields(
-            GraphQLObjectType parentType,
+            GraphQLUnmodifiedType parentType,
             SelectionSet selectionSet,
             Set<String> coordinates,
             Map<String, FragmentDefinition> fragments,
-            GraphQLSchema schema
+            GraphQLSchema schema,
+            Set<String> activeFragments
     ) {
         if (selectionSet == null) {
             return;
@@ -95,36 +100,44 @@ final class ApiUsageDocumentAnalyzer {
 
         for (Selection<?> selection : selectionSet.getSelections()) {
             if (selection instanceof Field field) {
-                collectField(parentType, field, coordinates, fragments, schema);
+                collectField(parentType, field, coordinates, fragments, schema, activeFragments);
             } else if (selection instanceof FragmentSpread spread) {
-                collectFragment(spread, coordinates, fragments, schema);
+                collectFragment(spread, coordinates, fragments, schema, activeFragments);
             } else if (selection instanceof InlineFragment inlineFragment) {
-                collectInlineFragment(parentType, inlineFragment, coordinates, fragments, schema);
+                collectInlineFragment(parentType, inlineFragment, coordinates, fragments, schema, activeFragments);
             }
         }
     }
 
     private static void collectField(
-            GraphQLObjectType parentType,
+            GraphQLUnmodifiedType parentType,
             Field field,
             Set<String> coordinates,
             Map<String, FragmentDefinition> fragments,
-            GraphQLSchema schema
+            GraphQLSchema schema,
+            Set<String> activeFragments
     ) {
         String fieldName = field.getName();
         if (fieldName.startsWith("__")) {
             return;
         }
 
-        coordinates.add(parentType.getName() + "." + fieldName);
-        GraphQLFieldDefinition fieldDefinition = parentType.getFieldDefinition(fieldName);
-        if (fieldDefinition == null || field.getSelectionSet() == null) {
+        if (!(parentType instanceof GraphQLFieldsContainer fieldsContainer)) {
             return;
         }
 
+        GraphQLFieldDefinition fieldDefinition = fieldsContainer.getFieldDefinition(fieldName);
+        if (fieldDefinition == null || field.getSelectionSet() == null) {
+            if (fieldDefinition != null) {
+                coordinates.add(fieldsContainer.getName() + "." + fieldName);
+            }
+            return;
+        }
+
+        coordinates.add(fieldsContainer.getName() + "." + fieldName);
         GraphQLUnmodifiedType unwrapped = GraphQLTypeUtil.unwrapAll(fieldDefinition.getType());
-        if (unwrapped instanceof GraphQLObjectType objectType) {
-            collectFields(objectType, field.getSelectionSet(), coordinates, fragments, schema);
+        if (isSelectableParentType(unwrapped)) {
+            collectFields(unwrapped, field.getSelectionSet(), coordinates, fragments, schema, activeFragments);
         }
     }
 
@@ -132,35 +145,51 @@ final class ApiUsageDocumentAnalyzer {
             FragmentSpread spread,
             Set<String> coordinates,
             Map<String, FragmentDefinition> fragments,
-            GraphQLSchema schema
+            GraphQLSchema schema,
+            Set<String> activeFragments
     ) {
-        FragmentDefinition fragment = fragments.get(spread.getName());
+        String fragmentName = spread.getName();
+        FragmentDefinition fragment = fragments.get(fragmentName);
         if (fragment == null) {
             return;
         }
+        if (!activeFragments.add(fragmentName)) {
+            return;
+        }
 
-        GraphQLType type = schema.getType(fragment.getTypeCondition().getName());
-        if (type instanceof GraphQLObjectType objectType) {
-            collectFields(objectType, fragment.getSelectionSet(), coordinates, fragments, schema);
+        try {
+            GraphQLType type = schema.getType(fragment.getTypeCondition().getName());
+            if (type instanceof GraphQLUnmodifiedType unmodifiedType && isSelectableParentType(unmodifiedType)) {
+                collectFields(unmodifiedType, fragment.getSelectionSet(), coordinates, fragments, schema, activeFragments);
+            }
+        } finally {
+            activeFragments.remove(fragmentName);
         }
     }
 
     private static void collectInlineFragment(
-            GraphQLObjectType parentType,
+            GraphQLUnmodifiedType parentType,
             InlineFragment inlineFragment,
             Set<String> coordinates,
             Map<String, FragmentDefinition> fragments,
-            GraphQLSchema schema
+            GraphQLSchema schema,
+            Set<String> activeFragments
     ) {
         if (inlineFragment.getTypeCondition() == null) {
-            collectFields(parentType, inlineFragment.getSelectionSet(), coordinates, fragments, schema);
+            collectFields(parentType, inlineFragment.getSelectionSet(), coordinates, fragments, schema, activeFragments);
             return;
         }
 
         GraphQLType type = schema.getType(inlineFragment.getTypeCondition().getName());
-        if (type instanceof GraphQLObjectType objectType) {
-            collectFields(objectType, inlineFragment.getSelectionSet(), coordinates, fragments, schema);
+        if (type instanceof GraphQLUnmodifiedType unmodifiedType && isSelectableParentType(unmodifiedType)) {
+            collectFields(unmodifiedType, inlineFragment.getSelectionSet(), coordinates, fragments, schema, activeFragments);
         }
+    }
+
+    private static boolean isSelectableParentType(GraphQLUnmodifiedType type) {
+        return type instanceof GraphQLObjectType
+                || type instanceof GraphQLInterfaceType
+                || type instanceof GraphQLUnionType;
     }
 
     record ProcessedUsage(
