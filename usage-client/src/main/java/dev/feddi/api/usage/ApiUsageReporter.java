@@ -87,6 +87,7 @@ public final class ApiUsageReporter implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Consumer<Throwable> flushErrorHandler;
     private final DoubleSupplier randomSupplier;
+    private final boolean samplingEnabled;
     private volatile double sampleRate = 1.0;
     private volatile int multiplier = 1;
 
@@ -106,6 +107,7 @@ public final class ApiUsageReporter implements AutoCloseable {
         this.randomSupplier = builder.randomSupplier != null
                 ? builder.randomSupplier
                 : () -> ThreadLocalRandom.current().nextDouble();
+        this.samplingEnabled = builder.samplingEnabled;
         this.scheduler = builder.scheduler != null ? builder.scheduler : new ScheduledExecutorReporterScheduler();
 
         if (builder.autoStart) {
@@ -147,7 +149,7 @@ public final class ApiUsageReporter implements AutoCloseable {
             }
 
             requestCounter.incrementAndGet();
-            if (randomSupplier.getAsDouble() >= sampleRate) {
+            if (samplingEnabled && randomSupplier.getAsDouble() >= sampleRate) {
                 return false;
             }
 
@@ -157,7 +159,7 @@ public final class ApiUsageReporter implements AutoCloseable {
             }
 
             pendingCount.incrementAndGet();
-            pendingQueue.add(new PendingUsage(invocation, multiplier));
+            pendingQueue.add(new PendingUsage(invocation, samplingEnabled ? multiplier : 1));
             if (pendingCount.get() >= maxBatchSize) {
                 scheduler.execute(this::processAndFlushSafely);
             }
@@ -238,6 +240,11 @@ public final class ApiUsageReporter implements AutoCloseable {
 
     private void recalculateSampling() {
         long count = requestCounter.getAndSet(0);
+        if (!samplingEnabled) {
+            sampleRate = 1.0;
+            multiplier = 1;
+            return;
+        }
         double rps = count / (flushInterval.toMillis() / 1000.0);
         if (rps < 100) {
             sampleRate = 1.0;
@@ -431,6 +438,7 @@ public final class ApiUsageReporter implements AutoCloseable {
         private int maxQueueSize = DEFAULT_MAX_QUEUE_SIZE;
         private Duration flushInterval = DEFAULT_FLUSH_INTERVAL;
         private boolean autoStart = true;
+        private boolean samplingEnabled = true;
         private @Nullable Consumer<Throwable> flushErrorHandler;
         private @Nullable DoubleSupplier randomSupplier;
         private @Nullable ReporterScheduler scheduler;
@@ -528,6 +536,21 @@ public final class ApiUsageReporter implements AutoCloseable {
          */
         public Builder autoStart(boolean autoStart) {
             this.autoStart = autoStart;
+            return this;
+        }
+
+        /**
+         * Enables or disables adaptive usage sampling.
+         *
+         * <p>Sampling is enabled by default. Disabling it queues every accepted invocation with
+         * multiplier {@code 1}, which is mainly useful for controlled load tests that need to
+         * validate exact ingestion and rollup volume.
+         *
+         * @param samplingEnabled whether adaptive sampling is enabled
+         * @return this builder
+         */
+        public Builder samplingEnabled(boolean samplingEnabled) {
+            this.samplingEnabled = samplingEnabled;
             return this;
         }
 

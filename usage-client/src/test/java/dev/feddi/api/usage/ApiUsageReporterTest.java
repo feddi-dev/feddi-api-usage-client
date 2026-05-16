@@ -435,6 +435,38 @@ class ApiUsageReporterTest {
     }
 
     @Test
+    void samplingDisabledQueuesEveryInvocationWithoutMultiplierAtHighRequestRate() {
+        var httpClient = new InMemoryReactiveHttpClient();
+        var randomSupplier = new MutableDoubleSupplier(1.0);
+        var reporter = reporterBuilder(httpClient)
+                .flushInterval(Duration.ofSeconds(1))
+                .maxBatchSize(10_000)
+                .maxQueueSize(20_000)
+                .randomSupplier(randomSupplier)
+                .samplingEnabled(false)
+                .build();
+
+        queueUsage(reporter, 10_000);
+
+        StepVerifier.create(reporter.flushNow())
+                .assertNext(response -> assertThat(response.getAccepted()).isEqualTo(10_000))
+                .verifyComplete();
+
+        assertThat(reporter.getSampleRate()).isEqualTo(1.0);
+        assertThat(reporter.getMultiplier()).isEqualTo(1);
+        assertThat(httpClient.usageRequest(0).getEventsList())
+                .allSatisfy(event -> assertThat(event.hasMultiplier()).isFalse());
+
+        assertThat(reporter.report(invocation("query GetUser { user { name } }"))).isTrue();
+
+        StepVerifier.create(reporter.flushNow())
+                .assertNext(response -> assertThat(response.getAccepted()).isEqualTo(1))
+                .verifyComplete();
+
+        assertThat(httpClient.usageRequest(1).getEvents(0).hasMultiplier()).isFalse();
+    }
+
+    @Test
     void flushNow_reportsAnalyzerFailuresToHandlerDropsInvalidUsageAndSkipsHttp() {
         var httpClient = new InMemoryReactiveHttpClient();
         var errors = new CopyOnWriteArrayList<Throwable>();

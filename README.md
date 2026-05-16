@@ -162,10 +162,12 @@ Both request bodies are gzip-compressed and sent with
 - `flushInterval(...)` controls the scheduled background flush interval.
 - `maxBatchSize(...)` controls the maximum protobuf records per request.
 - `maxQueueSize(...)` controls the pending in-memory queue size.
+- `samplingEnabled(...)` controls adaptive sampling and defaults to `true`.
 - `flushErrorHandler(...)` receives background flush failures and per-record
   analysis failures.
 
 Sampling is recalculated on every flush from the request count observed during
 the flush interval. Traffic below 100 requests per second sends every event.
 Higher traffic is sampled and sent with a multiplier so aggregate counts remain
-representative.
+representative. Disable sampling only for controlled tests that need to send
+every accepted invocation without a multiplier.
